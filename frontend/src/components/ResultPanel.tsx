@@ -1,17 +1,24 @@
 "use client";
+import dynamic from "next/dynamic";
 import { ApiResponse, SimulationResult } from "@/lib/api";
 import CodeBlock from "./ui/CodeBlock";
-import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-} from "recharts";
 
-function MetricCard({ label, value }: { label: string; value: string | number }) {
+// Dynamic import the chart component to avoid SSR issues with recharts
+const PowerChart = dynamic(() => import("./ui/PowerChart"), { ssr: false });
+
+// Safely format a number
+function fmt(v: unknown, digits = 4): string {
+  if (v === null || v === undefined) return "-";
+  const n = typeof v === "number" ? v : Number(v);
+  if (isNaN(n)) return "-";
+  return n.toFixed(digits);
+}
+
+function MetricCard({ label, value }: { label: string; value: unknown }) {
   return (
     <div className="bg-white border border-gray-200 rounded-lg p-3 text-center">
       <div className="text-xs text-gray-500">{label}</div>
-      <div className="text-lg font-bold text-gray-900 mt-0.5">
-        {typeof value === "number" ? value.toFixed(4) : value}
-      </div>
+      <div className="text-lg font-bold text-gray-900 mt-0.5">{fmt(value)}</div>
     </div>
   );
 }
@@ -49,21 +56,21 @@ function ResultTable({ result }: { result: SimulationResult }) {
           {arms.map((arm, i) => (
             <tr key={arm} className={i % 2 === 0 ? "bg-white" : "bg-gray-50"}>
               <td className="border px-2 py-1 font-medium">{arm}</td>
-              <td className="border px-2 py-1 text-right">{result.referenceRate?.[i]}</td>
-              <td className="border px-2 py-1 text-right">{result.targetRate?.[i]}</td>
-              <td className="border px-2 py-1 text-right">{result.trueRate?.[i]}</td>
-              <td className="border px-2 py-1 text-right">{result.finalThreshold?.[i]?.toFixed(4)}</td>
-              <td className="border px-2 py-1 text-right font-semibold">{result.powerPerArm?.[i]?.toFixed(4)}</td>
-              <td className="border px-2 py-1 text-right">{result.bias?.[i]?.toFixed(4)}</td>
-              <td className="border px-2 py-1 text-right">{result.biasSD?.[i]?.toFixed(4)}</td>
-              <td className="border px-2 py-1 text-right">{result.avgPatients?.[i]?.toFixed(1)}</td>
-              <td className="border px-2 py-1 text-right">{result.sdPatients?.[i]?.toFixed(1)}</td>
+              <td className="border px-2 py-1 text-right">{fmt(result.referenceRate?.[i], 2)}</td>
+              <td className="border px-2 py-1 text-right">{fmt(result.targetRate?.[i], 2)}</td>
+              <td className="border px-2 py-1 text-right">{fmt(result.trueRate?.[i], 2)}</td>
+              <td className="border px-2 py-1 text-right">{fmt(result.finalThreshold?.[i])}</td>
+              <td className="border px-2 py-1 text-right font-semibold">{fmt(result.powerPerArm?.[i])}</td>
+              <td className="border px-2 py-1 text-right">{fmt(result.bias?.[i])}</td>
+              <td className="border px-2 py-1 text-right">{fmt(result.biasSD?.[i])}</td>
+              <td className="border px-2 py-1 text-right">{fmt(result.avgPatients?.[i], 1)}</td>
+              <td className="border px-2 py-1 text-right">{fmt(result.sdPatients?.[i], 1)}</td>
               {hasInterim && (
                 <>
-                  <td className="border px-2 py-1 text-right">{result.probFutility1?.[i]?.toFixed(4)}</td>
-                  <td className="border px-2 py-1 text-right">{result.probEfficacy1?.[i]?.toFixed(4)}</td>
-                  <td className="border px-2 py-1 text-right">{result.probFutility2?.[i]?.toFixed(4)}</td>
-                  <td className="border px-2 py-1 text-right">{result.probEfficacy2?.[i]?.toFixed(4)}</td>
+                  <td className="border px-2 py-1 text-right">{fmt(result.probFutility1?.[i])}</td>
+                  <td className="border px-2 py-1 text-right">{fmt(result.probEfficacy1?.[i])}</td>
+                  <td className="border px-2 py-1 text-right">{fmt(result.probFutility2?.[i])}</td>
+                  <td className="border px-2 py-1 text-right">{fmt(result.probEfficacy2?.[i])}</td>
                 </>
               )}
             </tr>
@@ -71,30 +78,6 @@ function ResultTable({ result }: { result: SimulationResult }) {
         </tbody>
       </table>
     </div>
-  );
-}
-
-function PowerChart({ result }: { result: SimulationResult }) {
-  const data = result.armIndex.map((arm, i) => ({
-    name: `Arm ${arm}`,
-    Power: result.powerPerArm?.[i] ?? 0,
-    "True Rate": result.trueRate?.[i] ?? 0,
-    "Ref Rate": result.referenceRate?.[i] ?? 0,
-  }));
-
-  return (
-    <ResponsiveContainer width="100%" height={250}>
-      <BarChart data={data} margin={{ top: 10, right: 20, left: 0, bottom: 5 }}>
-        <CartesianGrid strokeDasharray="3 3" />
-        <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-        <YAxis tick={{ fontSize: 11 }} domain={[0, 1]} />
-        <Tooltip />
-        <Legend wrapperStyle={{ fontSize: 11 }} />
-        <Bar dataKey="Power" fill="#3b82f6" />
-        <Bar dataKey="True Rate" fill="#10b981" />
-        <Bar dataKey="Ref Rate" fill="#ef4444" />
-      </BarChart>
-    </ResponsiveContainer>
   );
 }
 
@@ -123,6 +106,13 @@ export default function ResultPanel({ response }: { response: ApiResponse | null
 
   const result = response.result!;
 
+  const chartData = (result.armIndex || []).map((arm, i) => ({
+    name: `Arm ${arm}`,
+    Power: result.powerPerArm?.[i] ?? 0,
+    "True Rate": result.trueRate?.[i] ?? 0,
+    "Ref Rate": result.referenceRate?.[i] ?? 0,
+  }));
+
   return (
     <div className="p-4 space-y-4 overflow-auto">
       {/* Headline metrics */}
@@ -135,7 +125,7 @@ export default function ResultPanel({ response }: { response: ApiResponse | null
       {/* Chart */}
       <div className="bg-white border border-gray-200 rounded-lg p-3">
         <h3 className="text-xs font-semibold text-gray-700 mb-2">Power by Arm</h3>
-        <PowerChart result={result} />
+        <PowerChart data={chartData} />
       </div>
 
       {/* Table */}

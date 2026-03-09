@@ -1,5 +1,27 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://basket-trials-api.fly.dev";
 
+// R's jsonlite serializes scalars as [value] — unwrap them recursively
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function unbox(obj: any): any {
+  if (obj === null || obj === undefined) return obj;
+  if (Array.isArray(obj)) {
+    // Single-element arrays of primitives → unwrap to scalar
+    // Multi-element arrays → keep as arrays but unbox each element
+    if (obj.length === 1 && (typeof obj[0] !== "object" || obj[0] === null)) {
+      return obj[0];
+    }
+    return obj.map(unbox);
+  }
+  if (typeof obj === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(obj)) {
+      out[k] = unbox(v);
+    }
+    return out;
+  }
+  return obj;
+}
+
 async function post<T>(endpoint: string, body: Record<string, unknown>): Promise<T> {
   const res = await fetch(`${API_URL}${endpoint}`, {
     method: "POST",
@@ -7,7 +29,7 @@ async function post<T>(endpoint: string, body: Record<string, unknown>): Promise
     body: JSON.stringify(body),
   });
   const data = await res.json();
-  return data as T;
+  return unbox(data) as T;
 }
 
 export interface SimulationParams {
