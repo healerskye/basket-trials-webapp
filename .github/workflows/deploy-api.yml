@@ -1,0 +1,64 @@
+name: Build & Deploy Basket Trials API
+
+on:
+  push:
+    branches: [main]
+    paths: ["api/**", ".github/workflows/deploy-api.yml"]
+
+concurrency:
+  group: deploy-api
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install flyctl
+        run: curl -fsSL https://fly.io/install.sh | sh
+
+      - name: Build Docker image
+        run: docker build -t basket-trials-api:local ./api
+
+      - name: Smoke test — verify C++ compilation and package loading
+        run: |
+          docker run --rm basket-trials-api:local Rscript -e "library(plumber); library(Rcpp); cat('plumber+Rcpp OK\n')"
+          docker run --rm basket-trials-api:local Rscript -e "library(Rcpp); sourceCpp('/api/bhm_function.cpp'); cat('bhm OK\n')"
+
+      - name: Check Fly.io machine state
+        run: |
+          export PATH="$HOME/.fly/bin:$PATH"
+          STATE=$(flyctl machines list --app basket-trials-api --json 2>/dev/null | python3 -c "
+          import json,sys
+          data=json.load(sys.stdin)
+          if not data: print('none')
+          else: print(data[0].get('state','unknown'))" 2>/dev/null || echo "none")
+          echo "Machine state: $STATE"
+          if [ "$STATE" = "stopped" ] || [ "$STATE" = "failed" ] || [ "$STATE" = "none" ]; then
+            echo "Destroying old machines..."
+            MACHINES=$(flyctl machines list --app basket-trials-api --json 2>/dev/null | python3 -c "
+            import json,sys
+            data=json.load(sys.stdin)
+            print(' '.join([m['id'] for m in data]))" 2>/dev/null || echo "")
+            for m in $MACHINES; do
+              flyctl machines destroy "$m" --app basket-trials-api --force 2>&1 || true
+            done
+          fi
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      - name: Deploy to Fly.io
+        run: |
+          export PATH="$HOME/.fly/bin:$PATH"
+          flyctl deploy \
+            --config api/fly.toml \
+            --local-only \
+            --image basket-trials-api:local \
+            --ha=false \
+            2>&1
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
