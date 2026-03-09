@@ -20,7 +20,11 @@ export interface CommonState {
   nullScenario: boolean;
 }
 
-export function defaultCommon(narm = 3): CommonState {
+export function defaultCommon(narm = 4): CommonState {
+  // Default: mixed scenario — first arm at p1, rest at p0
+  const respRate = Array(narm).fill(0.15);
+  if (narm >= 2) respRate[0] = 0.35;
+  if (narm >= 4) respRate[1] = 0.35;
   return {
     seed: 12345,
     simN: 100,
@@ -30,12 +34,12 @@ export function defaultCommon(narm = 3): CommonState {
     alpha: Array(narm).fill(0.1),
     samplesize: Array(narm).fill(27),
     speed: Array(narm).fill(1),
-    respRate: Array(narm).fill(0.15),
+    respRate,
     futstop: 1,
     futthr: 0.1,
     effstop: 0,
     effthr: 1.0,
-    nullScenario: true,
+    nullScenario: false,
   };
 }
 
