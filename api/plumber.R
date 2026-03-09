@@ -493,16 +493,31 @@ run_batch_sim <- function(design, body) {
   effstop    <- .toInt(body$effstop, 0L)
   effthr     <- .toNum(body$effthr, 1.0)
 
-  scenarios  <- body$scenarios
-  thresholds <- body$thresholds
-  param      <- body$designParams
+  scenarios_raw  <- body$scenarios
+  thresholds_raw <- body$thresholds
+  param          <- body$designParams
 
-  if (is.null(scenarios) || length(scenarios) == 0) {
+  if (is.null(scenarios_raw) || length(scenarios_raw) == 0) {
     stop("scenarios must be a non-empty array")
   }
-  if (is.null(thresholds) || length(thresholds) == 0) {
+  if (is.null(thresholds_raw) || length(thresholds_raw) == 0) {
     stop("thresholds must be a non-empty array")
   }
+
+  # jsonlite may parse array-of-objects as data.frame — normalize to list-of-lists
+  .to_row_list <- function(x) {
+    if (is.data.frame(x)) {
+      lapply(seq_len(nrow(x)), function(i) {
+        row <- as.list(x[i, , drop = FALSE])
+        # Unlist any list-columns (e.g. respRate parsed as list of vectors)
+        lapply(row, function(v) if (is.list(v)) unlist(v) else v)
+      })
+    } else {
+      x
+    }
+  }
+  scenarios  <- .to_row_list(scenarios_raw)
+  thresholds <- .to_row_list(thresholds_raw)
 
   cohortsize <- cohortsize_gen(futstop, effstop, speed, samplesize)
 
