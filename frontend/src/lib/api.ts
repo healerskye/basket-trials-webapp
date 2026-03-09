@@ -1,3 +1,5 @@
+import { BatchApiResponse } from "@/types/batch";
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://basket-trials-api.fly.dev";
 
 // R's jsonlite serializes scalars as [value] — unwrap them recursively
@@ -134,4 +136,8 @@ export function runExnex(params: ExnexParams) {
 
 export function runMuce(params: MuceParams) {
   return post<ApiResponse>("/muce", params as unknown as Record<string, unknown>);
+}
+
+export function runBatch(design: string, params: Record<string, unknown>) {
+  return post<BatchApiResponse>(`/batch/${design}`, params);
 }

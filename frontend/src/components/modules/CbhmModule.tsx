@@ -19,7 +19,7 @@ export default function CbhmModule({ onResult }: Props) {
   const run = async () => {
     setLoading(true);
     try {
-      const res = await runCbhm({ ...common, mu0, sigma0, varMin, varMax });
+      const res = await runCbhm({ ...common, alpha: common.p0.map(() => 0.1), respRate: common.p0, nullScenario: false, mu0, sigma0, varMin, varMax });
       onResult(res);
     } catch (e) {
       onResult({ success: false, error: String(e) });

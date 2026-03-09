@@ -25,7 +25,8 @@ export default function MuceModule({ onResult }: Props) {
     setLoading(true);
     try {
       const res = await runMuce({
-        ...common, scale1, scale3, sigmaZ, sigmaXi, sigmaEta,
+        ...common, alpha: common.p0.map(() => 0.1), respRate: common.p0, nullScenario: false,
+        scale1, scale3, sigmaZ, sigmaXi, sigmaEta,
         mu1, sigma1, mu2, sigma2,
       });
       onResult(res);

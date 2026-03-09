@@ -14,6 +14,7 @@ source("/api/bhm_sim.R")
 source("/api/cbhm_sim.R")
 source("/api/exnex_sim.R")
 source("/api/muce_sim.R")
+source("/api/calc_metrics.R")
 
 # ── Type coercion helpers ────────────────────────────────────────────────────
 `%||%` <- function(x, y) if (!is.null(x) && length(x) > 0 && !identical(x, "")) x else y
@@ -469,6 +470,209 @@ function(req, res) {
     )
 
     list(success = TRUE, result = result, rCode = rCode)
+  }, error = function(e) {
+    res$status <- 400L
+    list(success = FALSE, error = conditionMessage(e))
+  })
+}
+
+# ══════════════════════════════════════════════════════════════════════════════
+# BATCH ENDPOINTS — run simulation across multiple scenarios x thresholds
+# ══════════════════════════════════════════════════════════════════════════════
+
+run_batch_sim <- function(design, body) {
+  seed       <- .toInt(body$seed, 12345L)
+  simN       <- .toInt(body$simN, 100L)
+  narm       <- .toInt(body$narm, 3L)
+  p0         <- .toNumVec(body$p0, rep(0.15, narm))
+  p1         <- .toNumVec(body$p1, rep(0.35, narm))
+  samplesize <- .toNumVec(body$samplesize, rep(27, narm))
+  speed      <- .toNumVec(body$speed, rep(1, narm))
+  futstop    <- .toInt(body$futstop, 0L)
+  futthr     <- .toNum(body$futthr, 0.1)
+  effstop    <- .toInt(body$effstop, 0L)
+  effthr     <- .toNum(body$effthr, 1.0)
+
+  scenarios  <- body$scenarios
+  thresholds <- body$thresholds
+  param      <- body$designParams
+
+  if (is.null(scenarios) || length(scenarios) == 0) {
+    stop("scenarios must be a non-empty array")
+  }
+  if (is.null(thresholds) || length(thresholds) == 0) {
+    stop("thresholds must be a non-empty array")
+  }
+
+  cohortsize <- cohortsize_gen(futstop, effstop, speed, samplesize)
+
+  runsimFun <- switch(design,
+    bbhm = bbhm_runsimFun,
+    cbhm = cbhm_runsimFun,
+    exnex = exnex_runsimFun,
+    muce = muce_runsimFun,
+    stop(paste("Unknown design:", design))
+  )
+
+  all_results <- list()
+
+  for (si in seq_along(scenarios)) {
+    sc <- scenarios[[si]]
+    sc_name   <- sc$name %||% paste("Scenario", si)
+    resp_rate <- as.numeric(sc$respRate)
+    if (length(resp_rate) != narm) {
+      stop(paste("Scenario", si, "respRate length must equal narm"))
+    }
+
+    # Run simulation once per scenario (seed offset for reproducibility)
+    sim_res <- runsimFun(
+      seed = seed + si - 1L, simN = simN, ndose = 1, ntype = narm,
+      q0 = p0, q1 = p1, cohortsize = cohortsize, p.true = resp_rate,
+      futstop = futstop, futthr = futthr, effstop = effstop, effthr = effthr,
+      param = param
+    )
+
+    avg_patients <- .cleanNum(round(colMeans(sim_res$final.basket.n), 2))
+    sd_patients  <- .cleanNum(round(apply(sim_res$final.basket.n, 2, sd), 2))
+    fut_rates <- .cleanNum(round(colMeans(sim_res$futility), 4))
+    eff_rates <- .cleanNum(round(colMeans(sim_res$efficacy), 4))
+
+    for (ti in seq_along(thresholds)) {
+      tc <- thresholds[[ti]]
+      tc_name  <- tc$name %||% paste("Threshold", ti)
+      thr_vals <- as.numeric(tc$values)
+      if (length(thr_vals) != narm) {
+        stop(paste("Threshold", ti, "values length must equal narm"))
+      }
+
+      metrics <- calcMetrics(sim_res, p.true = resp_rate, q0 = p0, threshold = thr_vals)
+
+      row <- list(
+        scenario    = sc_name,
+        threshold   = tc_name,
+        fwer        = if (is.na(metrics$FWER)) NULL else round(metrics$FWER, 4),
+        disjPower   = if (is.na(metrics$disjunctive.power)) NULL else round(metrics$disjunctive.power, 4),
+        conjPower   = if (is.na(metrics$conjunctive.power)) NULL else round(metrics$conjunctive.power, 4),
+        rejectRates = .cleanNum(round(metrics$reject.rate, 4)),
+        type1Errors = .cleanNum(round(metrics$type1.error, 4)),
+        powers      = .cleanNum(round(metrics$power, 4)),
+        nullBaskets = as.integer(metrics$null.baskets),
+        altBaskets  = as.integer(metrics$alt.baskets),
+        futilityRates = fut_rates,
+        efficacyRates = eff_rates,
+        pTrue       = resp_rate,
+        avgPatients = avg_patients,
+        sdPatients  = sd_patients
+      )
+      all_results <- c(all_results, list(row))
+    }
+  }
+
+  list(success = TRUE, results = all_results)
+}
+
+# ── Batch BBHM endpoint ─────────────────────────────────────────────────────
+#* @post /batch/bbhm
+function(req, res) {
+  tryCatch({
+    body <- req$body
+    narm <- .toInt(body$narm, 3L)
+    p0 <- .toNumVec(body$p0, rep(0.15, narm))
+    p1 <- .toNumVec(body$p1, rep(0.35, narm))
+
+    dp <- body$designParams
+    if (is.null(dp)) dp <- list()
+    dp$mu0     <- .toNum(dp$mu0, mean(log(p0 / (1 - p0)) - log(p1 / (1 - p1))))
+    dp$sigma0  <- .toNum(dp$sigma0, 10)
+    dp$lambda1 <- .toNum(dp$lambda1, 0.0005)
+    dp$lambda2 <- .toNum(dp$lambda2, 0.000005)
+    body$designParams <- dp
+
+    run_batch_sim("bbhm", body)
+  }, error = function(e) {
+    res$status <- 400L
+    list(success = FALSE, error = conditionMessage(e))
+  })
+}
+
+# ── Batch CBHM endpoint ─────────────────────────────────────────────────────
+#* @post /batch/cbhm
+function(req, res) {
+  tryCatch({
+    body <- req$body
+    narm <- .toInt(body$narm, 3L)
+    p0 <- .toNumVec(body$p0, rep(0.15, narm))
+
+    dp <- body$designParams
+    if (is.null(dp)) dp <- list()
+    dp$mu0     <- .toNum(dp$mu0, mean(log(p0 / (1 - p0))))
+    dp$sigma0  <- .toNum(dp$sigma0, 10)
+    dp$var_min <- .toNum(dp$var_min, 1)
+    dp$var_max <- .toNum(dp$var_max, 80)
+    body$designParams <- dp
+
+    run_batch_sim("cbhm", body)
+  }, error = function(e) {
+    res$status <- 400L
+    list(success = FALSE, error = conditionMessage(e))
+  })
+}
+
+# ── Batch EXNEX endpoint ────────────────────────────────────────────────────
+#* @post /batch/exnex
+function(req, res) {
+  tryCatch({
+    body <- req$body
+    narm <- .toInt(body$narm, 3L)
+    p0 <- .toNumVec(body$p0, rep(0.15, narm))
+    p1 <- .toNumVec(body$p1, rep(0.35, narm))
+
+    dp <- body$designParams
+    if (is.null(dp)) dp <- list()
+    mu0_1    <- .toNum(dp$mu0_1, log(mean(p0) / (1 - mean(p0))))
+    sigma0_1 <- .toNum(dp$sigma0_1, sqrt(1 / mean(p0) + 1 / (1 - mean(p0)) - 1))
+    mu0_2    <- .toNum(dp$mu0_2, log(mean(p1) / (1 - mean(p1))))
+    sigma0_2 <- .toNum(dp$sigma0_2, sqrt(1 / mean(p1) + 1 / (1 - mean(p1)) - 1))
+    scale1   <- .toNum(dp$scale1, 1)
+    scale2   <- .toNum(dp$scale2, 1)
+    nex_m    <- .toNum(dp$nexM, log(mean(p0 + p1) / (2 - mean(p0 + p1))))
+    nex_v    <- .toNum(dp$nexV, sqrt(1 / mean((p1 + p0) / 2) + 1 / (1 - mean((p1 + p0) / 2))))
+
+    body$designParams <- list(
+      w = c(0.25, 0.25, 0.5),
+      mu0 = c(mu0_1, mu0_2),
+      sigma0 = c(sigma0_1, sigma0_2),
+      scale = c(scale1, scale2),
+      m = nex_m, v = nex_v
+    )
+
+    run_batch_sim("exnex", body)
+  }, error = function(e) {
+    res$status <- 400L
+    list(success = FALSE, error = conditionMessage(e))
+  })
+}
+
+# ── Batch MUCE endpoint ─────────────────────────────────────────────────────
+#* @post /batch/muce
+function(req, res) {
+  tryCatch({
+    body <- req$body
+
+    dp <- body$designParams
+    if (is.null(dp)) dp <- list()
+    dp$scale1    <- .toNum(dp$scale1, 2.5)
+    dp$scale3    <- .toNum(dp$scale3, 2.5)
+    dp$sigma.z   <- .toNum(dp$sigma.z, 1)
+    dp$sigma.xi  <- .toNum(dp$sigma.xi, 1)
+    dp$sigma.eta <- .toNum(dp$sigma.eta, 1)
+    dp$mu1       <- .toNum(dp$mu1, 0)
+    dp$sigma1    <- .toNum(dp$sigma1, 1)
+    dp$mu2       <- .toNum(dp$mu2, 0)
+    dp$sigma2    <- .toNum(dp$sigma2, 1)
+    body$designParams <- dp
+
+    run_batch_sim("muce", body)
   }, error = function(e) {
     res$status <- 400L
     list(success = FALSE, error = conditionMessage(e))

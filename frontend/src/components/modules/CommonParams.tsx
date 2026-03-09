@@ -9,37 +9,27 @@ export interface CommonState {
   narm: number;
   p0: number[];
   p1: number[];
-  alpha: number[];
   samplesize: number[];
   speed: number[];
-  respRate: number[];
   futstop: number;
   futthr: number;
   effstop: number;
   effthr: number;
-  nullScenario: boolean;
 }
 
 export function defaultCommon(narm = 4): CommonState {
-  // Default: mixed scenario — first arm at p1, rest at p0
-  const respRate = Array(narm).fill(0.15);
-  if (narm >= 2) respRate[0] = 0.35;
-  if (narm >= 4) respRate[1] = 0.35;
   return {
     seed: 12345,
     simN: 100,
     narm,
     p0: Array(narm).fill(0.15),
     p1: Array(narm).fill(0.35),
-    alpha: Array(narm).fill(0.1),
     samplesize: Array(narm).fill(27),
     speed: Array(narm).fill(1),
-    respRate,
     futstop: 1,
     futthr: 0.1,
     effstop: 0,
     effthr: 1.0,
-    nullScenario: false,
   };
 }
 
@@ -62,10 +52,8 @@ export default function CommonParams({ state, onChange }: Props) {
       ...s,
       p0: resize(s.p0, 0.15),
       p1: resize(s.p1, 0.35),
-      alpha: resize(s.alpha, 0.1),
       samplesize: resize(s.samplesize, 27),
       speed: resize(s.speed, 1),
-      respRate: resize(s.respRate, 0.15),
     };
     if (JSON.stringify(newState) !== JSON.stringify(s)) onChange(newState);
   }, [s.narm]);
@@ -89,10 +77,8 @@ export default function CommonParams({ state, onChange }: Props) {
         </h3>
         <ArrayInput label="Reference Rate (p0)" values={s.p0} onChange={(v) => set("p0", v)} min={0} max={1} step={0.01} help="Null response rate per arm" />
         <ArrayInput label="Target Rate (p1)" values={s.p1} onChange={(v) => set("p1", v)} min={0} max={1} step={0.01} help="Alternative response rate per arm" />
-        <ArrayInput label="Alpha" values={s.alpha} onChange={(v) => set("alpha", v)} min={0.01} max={0.5} step={0.01} help="Type I error rate per arm" />
         <ArrayInput label="Sample Size" values={s.samplesize} onChange={(v) => set("samplesize", v)} min={5} max={500} step={1} />
         <ArrayInput label="Enrollment Speed" values={s.speed} onChange={(v) => set("speed", v)} min={0.1} max={10} step={0.1} />
-        <ArrayInput label="True Response Rate" values={s.respRate} onChange={(v) => set("respRate", v)} min={0} max={1} step={0.01} help="Actual response rate for simulation" />
       </div>
 
       <div className="bg-amber-50 rounded-lg p-3">
@@ -129,15 +115,6 @@ export default function CommonParams({ state, onChange }: Props) {
             )}
           </div>
         </div>
-        <label className="flex items-center gap-2 text-xs text-gray-700 mt-2">
-          <input
-            type="checkbox"
-            checked={s.nullScenario}
-            onChange={(e) => set("nullScenario", e.target.checked)}
-            className="rounded"
-          />
-          Null Scenario (calibrate thresholds)
-        </label>
       </div>
     </div>
   );

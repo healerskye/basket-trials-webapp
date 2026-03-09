@@ -24,7 +24,8 @@ export default function ExnexModule({ onResult }: Props) {
     setLoading(true);
     try {
       const res = await runExnex({
-        ...common, mu0_1, sigma0_1, mu0_2, sigma0_2,
+        ...common, alpha: common.p0.map(() => 0.1), respRate: common.p0, nullScenario: false,
+        mu0_1, sigma0_1, mu0_2, sigma0_2,
         scale1, scale2, nexM, nexV,
       });
       onResult(res);
